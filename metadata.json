@@ -1,0 +1,6 @@
+{
+  "name": "PranaScan",
+  "description": "Secure clinical-grade clinical transcription parser, jargon translator, and patient-friendly medical report annotator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
