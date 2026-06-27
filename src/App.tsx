@@ -11,6 +11,7 @@ import {
 
 // Lazy load heavy components to drastically reduce initial bundle size and load times
 const LoginModal = lazy(() => import('./components/LoginModal.jsx'));
+const LoginPage = lazy(() => import('./components/LoginPage.jsx'));
 const HistoryList = lazy(() => import('./components/HistoryList.jsx'));
 const ReportViewer = lazy(() => import('./components/ReportViewer.jsx'));
 const PatientGuide = lazy(() => import('./components/PatientGuide.jsx'));
@@ -217,7 +218,7 @@ export default function App() {
     const interval = setInterval(() => {
       msgIdx = (msgIdx + 1) % loaderMsgs.length;
       setSubmissionMessage(loaderMsgs[msgIdx]);
-    }, 2800);
+    }, 900);
 
     try {
       const headers: Record<string, string> = {
@@ -314,6 +315,19 @@ export default function App() {
       date: record.createdAt.substring(0, 10)
     });
   };
+
+  if (!user) {
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Loading secure portal...</span>
+        </div>
+      }>
+        <LoginPage onSuccess={handleLoginSuccess} />
+      </Suspense>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col md:flex-row font-sans text-slate-800 antialiased relative overflow-x-hidden" id="clinic-app-root">

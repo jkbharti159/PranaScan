@@ -160,20 +160,20 @@ Extract clinical insights and produce a fully annotated patient empowerment anal
 You must return a valid JSON object matching the following TypeScript interface structure (do not return any other text, just the raw JSON):
 
 interface AnalysisResult {
-  patientFriendlySummary: string; // Extensive, empathetic, professional, plain-language description translating the findings and clinical trajectory so that an average layperson can understand their status completely. Keep it detailed but easy to comprehend.
+  patientFriendlySummary: string; // Empathetic, plain-language description translating the key findings. Keep it highly concise (limit to 2-3 clear, high-impact sentences) to avoid processing latency.
   specialtyClassification: string; // The primary medical specialty involved (e.g. Cardiology, Neurology, Orthopedics, General Surgery, Gastroenterology, Pulmonology, etc.)
   severityLevel: 'Low/Routine' | 'Medium/Follow-up' | 'High/Consultation' | 'Urgent'; 
-  severityExplanation: string; // Explanation of what this rating represents for the patient. Explain that this is a non-diagnostic classification.
+  severityExplanation: string; // Concise explanation of what this rating represents for the patient. Explain that this is a non-diagnostic classification.
   clinicalFindings: Array<{
-    finding: string; // Specific physical, laboratory, or radiological finding extracted from the text (e.g., "Left Meniscal Tear" or "Stage II Hypertension")
-    details: string; // Layperson explanation of what this finding physically means in the body
+    finding: string; // Specific physical, laboratory, or radiological finding extracted from the text (e.g., "Left Meniscal Tear")
+    details: string; // Concise explanation of what this finding physically means in the body
     significance: 'Routine' | 'Needs Attention' | 'Action Required'; // Priority flag based on report urgency
-  }>;
+  }>; // Extract at most 4 key findings to minimize latency.
   medicalJargonTerms: Array<{
-    term: string; // The acronym, abbreviation, or complex medical terminology found (e.g. "dyspnea", "CLOtest", "LVH", "angina", "substernal", "epigastric")
+    term: string; // The acronym, abbreviation, or complex medical terminology found (e.g. "dyspnea", "CLOtest")
     description: string; // Precise medical definitions
-    plainEnglish: string; // Friendly, approachable translation (e.g., "shortness of breath", "test for stomach bacteria", "thickening of the heart wall")
-  }>;
+    plainEnglish: string; // Friendly, approachable translation (e.g., "shortness of breath")
+  }>; // Extract at most 4 key terms to minimize latency.
   entities: {
     medications: Array<{
       name: string; // Name of drug (e.g. "Lisinopril")
@@ -181,20 +181,20 @@ interface AnalysisResult {
       dosageInstruction: string; // Extracted dose and frequency (e.g. "20mg daily")
     }>;
     procedures: Array<{
-      name: string; // E.g., "Endoscopy", "Biopsy", "Appendectomy", "Nuclear Stress Test"
+      name: string; // E.g., "Endoscopy", "Biopsy"
       purpose: string; // Purpose of the procedure
       status: string; // "Completed", "Scheduled", "Recommended", or "Underway"
     }>;
     vitalSigns: Array<{
-      signal: string; // E.g., "Blood Pressure", "Heart Rate", "SpO2 (Oxygen Level)"
-      value: string; // Value found, e.g., "142/92 mmHg" or "96%"
-      interpretation: string; // E.g., "Slightly Elevated", "Optimal", "Borderline Low"
+      signal: string; // E.g., "Blood Pressure", "Heart Rate"
+      value: string; // Value found
+      interpretation: string; // E.g., "Slightly Elevated", "Optimal"
     }>;
   };
-  suggestedDoctorQuestions: string[]; // Highly practical, empowering, bulleted questions that the patient can ask their physician during their next clinical consultation. Make them specific to this report.
+  suggestedDoctorQuestions: string[]; // Practical, empowering questions that the patient can ask their physician. Limit to 3 key questions max.
 }
 
-Be exhaustive and patient-centric. Your focus is translation, patient education, and clear annotation. Generate non-diagnostic insights and explicitly state the clinical context. Do not leave any fields empty. Ensure that if there are no medications, procedures, or vitals present in the text/file, you still return a clean empty array rather than null. For medical Jargon, extract at least 4 to 8 complex terms or acronyms from the report and formulate clean translations.`;
+Be extremely concise, clear, and direct. Avoid any verbose or fluffy text. Your focus is translation, patient education, and fast processing. Generate non-diagnostic insights and explicitly state the clinical context. Do not leave any fields empty. Ensure that if there are no medications, procedures, or vitals present in the text/file, you still return a clean empty array rather than null. Limit extracted lists (findings, jargon, questions) to a maximum of 3-4 high-yield items each to maintain ultra-fast generation times.`;
 
   // Build the parts arrays to handle multimodal input properly via GoogleGenAI SDK
   const contents: any[] = [];

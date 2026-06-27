@@ -6,16 +6,32 @@ import { analyzeMedicalReport, diagnosePossibleDisease, translatePatientSummaryH
 import { initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import fs from "fs";
+
+// Load configuration from firebase-applet-config.json
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  }
+} catch (e) {
+  console.error("Failed to read firebase-applet-config.json:", e);
+}
+
+// ALWAYS prefer project ID and database ID from the config file matching the user's active workspace
+const projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "grand-trees-d07pf";
+const databaseId = firebaseConfig.firestoreDatabaseId || undefined;
 
 // Initialize Firebase Admin SDK
 const privateKey = process.env.FIREBASE_PRIVATE_KEY 
   ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
   : undefined;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const projectId = process.env.FIREBASE_PROJECT_ID || "grand-trees-d07pf";
 
+let adminApp;
 if (privateKey && clientEmail) {
-  initializeApp({
+  adminApp = initializeApp({
     credential: cert({
       projectId,
       clientEmail,
@@ -24,9 +40,14 @@ if (privateKey && clientEmail) {
     projectId
   });
 } else {
-  initializeApp({
+  adminApp = initializeApp({
     projectId
   });
+}
+
+// Helper function to connect to the correct Firestore database
+function getDb() {
+  return getFirestore(adminApp, databaseId);
 }
 
 const app = express();
@@ -44,7 +65,7 @@ async function verifyFirebaseToken(token: string) {
     const email = decodedToken.email;
     const name = decodedToken.name || "User";
 
-    const db = getFirestore();
+    const db = getDb();
     const userDocRef = db.collection("users").doc(uid);
     const userDoc = await userDocRef.get();
 
@@ -167,7 +188,7 @@ app.post("/api/analyze", optionalAuth, async (req: any, res) => {
 
     // If the user has structured local session credentials, save to their history
     if (req.user) {
-      const db = getFirestore();
+      const db = getDb();
       const analysisRecord = {
         userId: req.user.id,
         title: resolvedTitle,
@@ -243,7 +264,7 @@ app.post("/api/translate", async (req, res) => {
 // Fetch Analysis History
 app.get("/api/history", requireAuth, async (req: any, res) => {
   try {
-    const db = getFirestore();
+    const db = getDb();
     const snapshot = await db.collection('analyses')
       .where('userId', '==', req.user.id)
       .get();
@@ -258,7 +279,7 @@ app.get("/api/history", requireAuth, async (req: any, res) => {
 // Fetch Specific Analysis Details
 app.get("/api/history/:id", requireAuth, async (req: any, res) => {
   try {
-    const db = getFirestore();
+    const db = getDb();
     const doc = await db.collection('analyses').doc(req.params.id).get();
     if (!doc.exists || doc.data()?.userId !== req.user.id) {
       return res.status(404).json({ error: "Specific report analysis record could not be found." });
@@ -273,7 +294,7 @@ app.get("/api/history/:id", requireAuth, async (req: any, res) => {
 // Delete Specific Saved Analysis
 app.delete("/api/history/:id", requireAuth, async (req: any, res) => {
   try {
-    const db = getFirestore();
+    const db = getDb();
     const docRef = db.collection('analyses').doc(req.params.id);
     const doc = await docRef.get();
     if (!doc.exists || doc.data()?.userId !== req.user.id) {

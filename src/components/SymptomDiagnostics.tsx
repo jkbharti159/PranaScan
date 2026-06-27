@@ -121,7 +121,7 @@ export default function SymptomDiagnostics() {
     // Rotate loading messages
     const stepInterval = setInterval(() => {
       setLoadingStep((prev) => (prev < loadingMessages.length - 1 ? prev + 1 : prev));
-    }, 1600);
+    }, 750);
 
     try {
       const response = await fetch('/api/diagnose', {
