@@ -1,20 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Header from './components/Header.jsx';
-import LoginModal from './components/LoginModal.jsx';
 import PresetSelector from './components/PresetSelector.jsx';
-import HistoryList from './components/HistoryList.jsx';
-import ReportViewer from './components/ReportViewer.jsx';
-import PatientGuide from './components/PatientGuide.jsx';
-import SymptomDiagnostics from './components/SymptomDiagnostics.jsx';
-import Medical3DVisualizer from './components/Medical3DVisualizer.jsx';
-import Ambient3DBackground from './components/Ambient3DBackground.jsx';
-import Footer3DVisuals from './components/Footer3DVisuals.jsx';
 import { User, ActiveTab, HistoryRecord, AnalysisResult } from './types.js';
 import { MedicalSample } from './data/samples.js';
+import { logoutFromFirebase } from './lib/firebase.js';
 import { 
   FileText, ArrowDownToLine, BrainCircuit, Activity, Sparkles, CheckCircle2, AlertCircle, FileDigit, ShieldAlert,
   Upload, X, FileUp
 } from 'lucide-react';
+
+// Lazy load heavy components to drastically reduce initial bundle size and load times
+const LoginModal = lazy(() => import('./components/LoginModal.jsx'));
+const HistoryList = lazy(() => import('./components/HistoryList.jsx'));
+const ReportViewer = lazy(() => import('./components/ReportViewer.jsx'));
+const PatientGuide = lazy(() => import('./components/PatientGuide.jsx'));
+const SymptomDiagnostics = lazy(() => import('./components/SymptomDiagnostics.jsx'));
+const Medical3DVisualizer = lazy(() => import('./components/Medical3DVisualizer.jsx'));
+const Ambient3DBackground = lazy(() => import('./components/Ambient3DBackground.jsx'));
+const Footer3DVisuals = lazy(() => import('./components/Footer3DVisuals.jsx'));
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -174,7 +177,12 @@ export default function App() {
     showToast(`Welcome back, ${usr.fullName}! Clinical workspace loaded.`);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await logoutFromFirebase();
+    } catch (e) {
+      console.error('Firebase signout error:', e);
+    }
     setUser(null);
     setToken(null);
     localStorage.removeItem('acuramed_token');
@@ -310,7 +318,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col md:flex-row font-sans text-slate-800 antialiased relative overflow-x-hidden" id="clinic-app-root">
       {/* DYNAMIC AMBIENT 3D BACKGROUND WAVE LATTICE */}
-      <Ambient3DBackground />
+      <Suspense fallback={null}>
+        <Ambient3DBackground />
+      </Suspense>
       
       {/* HEADER NAVBAR / LEFT SIDEBAR */}
       <Header 
@@ -358,16 +368,23 @@ export default function App() {
         
         {/* ACTIVE ANALYZED DETAILS VIEW OVERLAY (IF ANALYZING IS IN VIEW) */}
         {activeTab === 'analyze' && currentAnalysis ? (
-          <ReportViewer 
-            analysis={currentAnalysis}
-            rawText={currentRawText}
-            metadata={currentMetadata}
-            onBack={() => {
-              setCurrentAnalysis(null);
-              setActiveTab('analyze');
-            }}
-            savedLocally={!!token}
-          />
+          <Suspense fallback={
+            <div className="bg-white border border-slate-200/60 rounded-3xl p-12 flex flex-col justify-center items-center gap-4 animate-pulse">
+              <div className="w-10 h-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rendering Comprehensive Clinical Diagnosis...</span>
+            </div>
+          }>
+            <ReportViewer 
+              analysis={currentAnalysis}
+              rawText={currentRawText}
+              metadata={currentMetadata}
+              onBack={() => {
+                setCurrentAnalysis(null);
+                setActiveTab('analyze');
+              }}
+              savedLocally={!!token}
+            />
+          </Suspense>
         ) : (
           <div>
             {/* VIEW DISPATCHING */}
@@ -602,7 +619,14 @@ export default function App() {
                 <div className="space-y-6">
                   
                   {/* 3D BIO-MATHEMATICAL VISUALS WIDGET */}
-                  <Medical3DVisualizer />
+                  <Suspense fallback={
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 h-[260px] flex flex-col justify-center items-center gap-3 animate-pulse">
+                      <div className="w-8 h-8 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Initializing 3D Lab...</span>
+                    </div>
+                  }>
+                    <Medical3DVisualizer />
+                  </Suspense>
 
                   {/* DATASETS INTRO MODULE ACCENTS */}
                   <div className="bg-slate-900 text-white rounded-3xl p-5 md:p-6 space-y-4">
@@ -701,26 +725,54 @@ export default function App() {
 
             {activeTab === 'projection' && (
               <div className="space-y-6" id="3d-projection-lab-wrapper">
-                <Medical3DVisualizer isWidescreenShowcase={true} />
+                <Suspense fallback={
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 h-[500px] flex flex-col justify-center items-center gap-4 animate-pulse">
+                    <div className="w-12 h-12 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+                    <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Constructing Holographic Environment...</span>
+                  </div>
+                }>
+                  <Medical3DVisualizer isWidescreenShowcase={true} />
+                </Suspense>
               </div>
             )}
 
             {activeTab === 'history' && (
-              <HistoryList 
-                records={historyRecords}
-                loading={historyLoading}
-                onSelectRecord={handleReviewHistoricScan}
-                onDeleteRecord={handleDeleteHistory}
-                onNavigateToAnalyze={() => setActiveTab('analyze')}
-              />
+              <Suspense fallback={
+                <div className="bg-white border border-slate-200/60 rounded-3xl p-12 flex flex-col justify-center items-center gap-4 animate-pulse">
+                  <div className="w-10 h-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Accessing Medical Folder Archives...</span>
+                </div>
+              }>
+                <HistoryList 
+                  records={historyRecords}
+                  loading={historyLoading}
+                  onSelectRecord={handleReviewHistoricScan}
+                  onDeleteRecord={handleDeleteHistory}
+                  onNavigateToAnalyze={() => setActiveTab('analyze')}
+                />
+              </Suspense>
             )}
 
             {activeTab === 'guide' && (
-              <PatientGuide />
+              <Suspense fallback={
+                <div className="bg-white border border-slate-200/60 rounded-3xl p-12 flex flex-col justify-center items-center gap-4 animate-pulse">
+                  <div className="w-10 h-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Loading Clinical Translation Guides...</span>
+                </div>
+              }>
+                <PatientGuide />
+              </Suspense>
             )}
 
             {activeTab === 'diagnose' && (
-              <SymptomDiagnostics />
+              <Suspense fallback={
+                <div className="bg-white border border-slate-200/60 rounded-3xl p-12 flex flex-col justify-center items-center gap-4 animate-pulse">
+                  <div className="w-10 h-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Loading Interactive Symptom Labs...</span>
+                </div>
+              }>
+                <SymptomDiagnostics />
+              </Suspense>
             )}
           </div>
         )}
@@ -747,7 +799,9 @@ export default function App() {
 
           {/* 3D Dark Visuals Row */}
           <div className="py-2 max-w-2xl mx-auto">
-            <Footer3DVisuals />
+            <Suspense fallback={null}>
+              <Footer3DVisuals />
+            </Suspense>
           </div>
         </div>
       </footer>
@@ -756,11 +810,20 @@ export default function App() {
 
       {/* SECURE AUTH MODALS */}
       {showLoginModal && (
-        <LoginModal 
-          onCheckAuth={() => {}} 
-          onClose={() => setShowLoginModal(false)}
-          onSuccess={handleLoginSuccess}
-        />
+        <Suspense fallback={
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-8 shadow-xl flex items-center gap-3">
+              <div className="w-5 h-5 rounded-full border-2 border-cyan-500/20 border-t-cyan-500 animate-spin" />
+              <span className="text-xs font-bold text-slate-500">Loading auth gateway...</span>
+            </div>
+          </div>
+        }>
+          <LoginModal 
+            onCheckAuth={() => {}} 
+            onClose={() => setShowLoginModal(false)}
+            onSuccess={handleLoginSuccess}
+          />
+        </Suspense>
       )}
 
       {/* SUBMISSION / ANALYZING PROGRESS OVERLAY screen */}

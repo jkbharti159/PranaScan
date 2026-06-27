@@ -2,73 +2,120 @@ import express from "express";
 import path from "path";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
-import { dbService } from "./server/dbService.js";
 import { analyzeMedicalReport, diagnosePossibleDisease, translatePatientSummaryHindi } from "./server/geminiService.js";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+
+// Initialize Firebase Admin SDK
+const privateKey = process.env.FIREBASE_PRIVATE_KEY 
+  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
+  : undefined;
+const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+const projectId = process.env.FIREBASE_PROJECT_ID || "grand-trees-d07pf";
+
+if (privateKey && clientEmail) {
+  initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+    projectId
+  });
+} else {
+  initializeApp({
+    projectId
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-const SECRET_KEY = process.env.JWT_SECRET || 'clinical-analyzer-super-secret-key-159';
 
 // Middleware for parsing json and urlencoded data
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Helper functions for stateless secure token signing and verification
-function generateToken(userId: string): string {
-  const signature = crypto.createHmac('sha256', SECRET_KEY).update(userId).digest('hex');
-  return `${userId}.${signature}`;
-}
-
-function verifyToken(token: string): string | null {
+// Helper function to verify Firebase ID tokens and retrieve/create the user profile
+async function verifyFirebaseToken(token: string) {
   try {
-    const [userId, signature] = token.split('.');
-    if (!userId || !signature) return null;
-    const expectedSig = crypto.createHmac('sha256', SECRET_KEY).update(userId).digest('hex');
-    if (signature === expectedSig) {
-      return userId;
+    const decodedToken = await getAuth().verifyIdToken(token);
+    const uid = decodedToken.uid;
+    const email = decodedToken.email;
+    const name = decodedToken.name || "User";
+
+    const db = getFirestore();
+    const userDocRef = db.collection("users").doc(uid);
+    const userDoc = await userDocRef.get();
+
+    if (userDoc.exists) {
+      const data = userDoc.data();
+      return {
+        id: uid,
+        username: email || "",
+        fullName: data?.fullName || name,
+        role: data?.role || "clinician",
+        createdAt: data?.createdAt || new Date().toISOString()
+      };
+    } else {
+      const newUser = {
+        uid,
+        email: email || "",
+        fullName: name,
+        role: "clinician",
+        createdAt: new Date().toISOString()
+      };
+      await userDocRef.set(newUser);
+      return {
+        id: uid,
+        username: email || "",
+        fullName: name,
+        role: "clinician",
+        createdAt: newUser.createdAt
+      };
     }
-  } catch (e) {
-    // Treat any parsing errors as invalid token
+  } catch (error) {
+    console.error("Firebase token verification failed:", error);
+    return null;
   }
-  return null;
 }
 
 // Authentication middleware
-function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authorization token required. Please log in first.' });
-  }
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authorization token required. Please log in first.' });
+    }
 
-  const token = authHeader.split(' ')[1];
-  const userId = verifyToken(token);
-  if (!userId) {
-    return res.status(401).json({ error: 'Session expired or invalid token. Please log in again.' });
-  }
+    const token = authHeader.split(' ')[1];
+    const user = await verifyFirebaseToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Session expired or invalid token. Please log in again.' });
+    }
 
-  const user = dbService.getUserById(userId);
-  if (!user) {
-    return res.status(401).json({ error: 'User not found.' });
+    (req as any).user = user;
+    next();
+  } catch (err) {
+    next(err);
   }
-
-  (req as any).user = user;
-  next();
 }
 
 // Optional Auth middleware (e.g. for guest / registered trial separation)
-function optionalAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    const userId = verifyToken(token);
-    if (userId) {
-      const user = dbService.getUserById(userId);
+async function optionalAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const user = await verifyFirebaseToken(token);
       if (user) {
         (req as any).user = user;
       }
     }
+    next();
+  } catch (err) {
+    next();
   }
-  next();
 }
 
 // ======================== API ROUTES ========================
@@ -80,59 +127,12 @@ app.get("/api/health", (req, res) => {
 
 // Register Account
 app.post("/api/auth/register", (req, res) => {
-  const { username, password, fullName, role } = req.body;
-
-  if (!username || !password || !fullName) {
-    return res.status(400).json({ error: "Username, password, and full name are required." });
-  }
-
-  if (password.length < 6) {
-    return res.status(400).json({ error: "Password must be at least 6 characters long." });
-  }
-
-  try {
-    const newUser = dbService.registerUser(username, password, fullName, role || 'clinician');
-    const token = generateToken(newUser.id);
-
-    res.status(201).json({
-      message: "Account created successfully.",
-      token,
-      user: {
-        id: newUser.id,
-        username: newUser.username,
-        fullName: newUser.fullName,
-        role: newUser.role
-      }
-    });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message || "Registration failed." });
-  }
+  res.status(410).json({ error: "Deprecated. Please register using Firebase client-side Authentication directly." });
 });
 
 // Login Account
 app.post("/api/auth/login", (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: "Username and password are required." });
-  }
-
-  const user = dbService.authenticate(username, password);
-  if (!user) {
-    return res.status(401).json({ error: "Invalid username or password." });
-  }
-
-  const token = generateToken(user.id);
-  res.json({
-    message: "Login successful.",
-    token,
-    user: {
-      id: user.id,
-      username: user.username,
-      fullName: user.fullName,
-      role: user.role
-    }
-  });
+  res.status(410).json({ error: "Deprecated. Please log in using Firebase client-side Authentication directly." });
 });
 
 // Current User Profile
@@ -167,15 +167,20 @@ app.post("/api/analyze", optionalAuth, async (req: any, res) => {
 
     // If the user has structured local session credentials, save to their history
     if (req.user) {
-      savedRecord = dbService.saveAnalysis(req.user.id, {
+      const db = getFirestore();
+      const analysisRecord = {
+        userId: req.user.id,
         title: resolvedTitle,
         patientName: patientName || "Anonymous Patient",
         age: Number(age) || 0,
         gender: gender || "Other",
         specialty: specialty || analysis.specialtyClassification,
         rawText: rawText || `[Multimodal Document Uploaded: ${uploadedFile?.name || 'Medical File'}]`,
-        analysis
-      });
+        analysis,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await db.collection('analyses').add(analysisRecord);
+      savedRecord = { id: docRef.id, ...analysisRecord };
     }
 
     res.json({
@@ -236,9 +241,14 @@ app.post("/api/translate", async (req, res) => {
 });
 
 // Fetch Analysis History
-app.get("/api/history", requireAuth, (req: any, res) => {
+app.get("/api/history", requireAuth, async (req: any, res) => {
   try {
-    const history = dbService.getAnalysesByUser(req.user.id);
+    const db = getFirestore();
+    const snapshot = await db.collection('analyses')
+      .where('userId', '==', req.user.id)
+      .get();
+    const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    history.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ history });
   } catch (error: any) {
     res.status(500).json({ error: "Failed to fetch analysis history." });
@@ -246,12 +256,14 @@ app.get("/api/history", requireAuth, (req: any, res) => {
 });
 
 // Fetch Specific Analysis Details
-app.get("/api/history/:id", requireAuth, (req: any, res) => {
+app.get("/api/history/:id", requireAuth, async (req: any, res) => {
   try {
-    const record = dbService.getAnalysisDetails(req.params.id, req.user.id);
-    if (!record) {
+    const db = getFirestore();
+    const doc = await db.collection('analyses').doc(req.params.id).get();
+    if (!doc.exists || doc.data()?.userId !== req.user.id) {
       return res.status(404).json({ error: "Specific report analysis record could not be found." });
     }
+    const record = { id: doc.id, ...doc.data() };
     res.json({ record });
   } catch (error: any) {
     res.status(500).json({ error: "Failed to fetch report details." });
@@ -259,12 +271,15 @@ app.get("/api/history/:id", requireAuth, (req: any, res) => {
 });
 
 // Delete Specific Saved Analysis
-app.delete("/api/history/:id", requireAuth, (req: any, res) => {
+app.delete("/api/history/:id", requireAuth, async (req: any, res) => {
   try {
-    const success = dbService.deleteAnalysis(req.params.id, req.user.id);
-    if (!success) {
+    const db = getFirestore();
+    const docRef = db.collection('analyses').doc(req.params.id);
+    const doc = await docRef.get();
+    if (!doc.exists || doc.data()?.userId !== req.user.id) {
       return res.status(404).json({ error: "Record not found or unauthorized delete operation." });
     }
+    await docRef.delete();
     res.json({ success: true, message: "Analysis record removed from your workspace." });
   } catch (error: any) {
     res.status(500).json({ error: "Failed to delete record." });
